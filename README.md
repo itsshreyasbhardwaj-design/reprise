@@ -2,7 +2,7 @@
 
 **Deterministic record / replay and time-travel debugging for AI agents.** Local-first, MCP-native.
 
-[![CI](https://github.com/OWNER/reprise/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/reprise/actions/workflows/ci.yml)
+[![CI](https://github.com/itsshreyasbhardwaj-design/reprise/actions/workflows/ci.yml/badge.svg)](https://github.com/itsshreyasbhardwaj-design/reprise/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 

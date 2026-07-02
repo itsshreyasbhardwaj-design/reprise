@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Union
 
+from .cost import DEFAULT_PRICES, Budget, BudgetExceeded, token_cost
 from .schema import Run, RunStatus, Step, StepError, StepKind, TokenUsage
 from .store import TraceStore
 
@@ -22,14 +23,23 @@ class Recorder:
         with rec.run():
             resp = rec.llm_call(request, lambda: client.create(**request))
             out = rec.tool_call("search", {"q": "x"}, lambda: do_search("x"))
+
+    Pass ``budget=Budget(max_usd=..., max_tokens=..., max_steps=...)`` to enforce a hard ceiling:
+    the offending step is still recorded, then :class:`~reprise.cost.BudgetExceeded` is raised.
     """
 
-    def __init__(self, path: Union[str, Path], name: str = "run", meta: Optional[dict] = None):
+    def __init__(self, path: Union[str, Path], name: str = "run", meta: Optional[dict] = None,
+                 *, budget: Optional[Budget] = None, prices: Optional[dict] = None):
         self.store = TraceStore(path)
         self._name = name
         self._meta = dict(meta or {})
         self._run_id: Optional[str] = None
         self._index = 0
+        self._budget = budget
+        self._prices = prices if prices is not None else DEFAULT_PRICES
+        self._spent_steps = 0
+        self._spent_tokens = 0
+        self._spent_usd = 0.0
 
     # -- lifecycle -------------------------------------------------------
     @contextmanager
@@ -69,16 +79,11 @@ class Recorder:
     def run_id(self) -> Optional[str]:
         return self._run_id
 
-    # -- recording primitives -------------------------------------------
-    def llm_call(
-        self,
-        request: dict[str, Any],
-        fn: Callable[[], Any],
-        *,
-        name: Optional[str] = None,
-        extract_usage: Optional[Callable[[Any], Optional[TokenUsage]]] = None,
-        cost: Optional[float] = None,
-    ) -> Any:
+    # -- recording primitives (sync) ------------------------------------
+    def llm_call(self, request: dict[str, Any], fn: Callable[[], Any], *,
+                 name: Optional[str] = None,
+                 extract_usage: Optional[Callable[[Any], Optional[TokenUsage]]] = None,
+                 cost: Optional[float] = None) -> Any:
         """Record one LLM call. ``fn`` performs the real call; its return value is captured."""
         label = name or (request.get("model") if isinstance(request, dict) else None) or "llm"
         started = time.time()
@@ -93,8 +98,8 @@ class Recorder:
                      tokens=usage, cost=cost, started=started, ended=time.time())
         return result
 
-    def tool_call(self, name: str, request: Any, fn: Callable[[], Any],
-                  *, kind: StepKind = StepKind.TOOL_CALL) -> Any:
+    def tool_call(self, name: str, request: Any, fn: Callable[[], Any], *,
+                  kind: StepKind = StepKind.TOOL_CALL) -> Any:
         """Record one tool call. ``fn`` performs the real call; its return value is captured."""
         started = time.time()
         try:
@@ -121,11 +126,42 @@ class Recorder:
         Works with the ``openai`` SDK and Ollama's OpenAI-compatible endpoint alike.
         """
         request = {"provider": "openai-compatible", "endpoint": "chat.completions", **kwargs}
-        return self.llm_call(
-            request,
-            lambda: client.chat.completions.create(**kwargs),
-            name=kwargs.get("model"),
-        )
+        return self.llm_call(request, lambda: client.chat.completions.create(**kwargs),
+                             name=kwargs.get("model"))
+
+    # -- recording primitives (async, for async agents / MCP) -----------
+    async def a_llm_call(self, request: dict[str, Any], fn: Callable[[], Any], *,
+                         name: Optional[str] = None,
+                         extract_usage: Optional[Callable[[Any], Optional[TokenUsage]]] = None,
+                         cost: Optional[float] = None) -> Any:
+        label = name or (request.get("model") if isinstance(request, dict) else None) or "llm"
+        started = time.time()
+        try:
+            result = await fn()
+        except Exception as exc:
+            self._record(StepKind.LLM_CALL, label, request, None,
+                         error=_error(exc), started=started, ended=time.time())
+            raise
+        usage = extract_usage(result) if extract_usage else _default_usage(result)
+        self._record(StepKind.LLM_CALL, label, request, result,
+                     tokens=usage, cost=cost, started=started, ended=time.time())
+        return result
+
+    async def a_tool_call(self, name: str, request: Any, fn: Callable[[], Any], *,
+                          kind: StepKind = StepKind.TOOL_CALL) -> Any:
+        started = time.time()
+        try:
+            result = await fn()
+        except Exception as exc:
+            self._record(kind, name, request, None, error=_error(exc),
+                         started=started, ended=time.time())
+            raise
+        self._record(kind, name, request, result, started=started, ended=time.time())
+        return result
+
+    async def a_mcp_tool_call(self, server: str, tool: str, request: Any,
+                              fn: Callable[[], Any]) -> Any:
+        return await self.a_tool_call(f"{server}:{tool}", request, fn, kind=StepKind.MCP_TOOL_CALL)
 
     # -- internals -------------------------------------------------------
     def _record(self, kind: StepKind, name: str, request: Any, response: Any, *,
@@ -137,6 +173,8 @@ class Recorder:
         req_ref = self.store.put_blob(request) if request is not None else None
         resp_ref = self.store.put_blob(response) if response is not None else None
         duration = (ended - started) * 1000.0 if (ended is not None and started) else None
+        if cost is None and tokens is not None:
+            cost = token_cost(name, tokens, self._prices)
         step = Step(
             index=self._next_index(),
             kind=kind,
@@ -153,7 +191,25 @@ class Recorder:
             meta=meta or {},
         )
         self.store.put_step(self._run_id, step)
+        self._enforce_budget(step)
         return step
+
+    def _enforce_budget(self, step: Step) -> None:
+        budget = self._budget
+        if budget is None:
+            return
+        self._spent_steps += 1
+        if step.tokens is not None:
+            self._spent_tokens += step.tokens.total or ((step.tokens.prompt or 0)
+                                                         + (step.tokens.completion or 0))
+        if step.cost:
+            self._spent_usd += step.cost
+        if budget.max_steps is not None and self._spent_steps > budget.max_steps:
+            raise BudgetExceeded(f"step budget exceeded ({self._spent_steps} > {budget.max_steps})")
+        if budget.max_tokens is not None and self._spent_tokens > budget.max_tokens:
+            raise BudgetExceeded(f"token budget exceeded ({self._spent_tokens} > {budget.max_tokens})")
+        if budget.max_usd is not None and self._spent_usd > budget.max_usd:
+            raise BudgetExceeded(f"cost budget exceeded (${self._spent_usd:.4f} > ${budget.max_usd})")
 
     def _next_index(self) -> int:
         i = self._index

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any, Iterator, Optional, Union
 
@@ -162,6 +163,37 @@ class TraceStore:
             "SELECT run_id FROM runs ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
         return row["run_id"] if row else None
+
+    def copy_run_prefix(self, run_id: str, at: int, dst: Optional["TraceStore"] = None,
+                        *, new_name: Optional[str] = None,
+                        status: RunStatus = RunStatus.FORKED) -> str:
+        """Copy steps ``[0, at)`` of a run into a new run (in ``dst``, or this store), with blobs.
+
+        Returns the new run_id. The new run records ``parent_run_id`` and ``forked_from_index`` so
+        its provenance is explicit. This seeds a fork; a program resumes recording from ``at``.
+        """
+        dst = dst or self
+        src = self.load_run(run_id, with_steps=True)
+        if src is None:
+            raise ValueError(f"unknown run {run_id}")
+        new_id = uuid.uuid4().hex
+        dst.upsert_run(Run(
+            run_id=new_id,
+            name=new_name or f"{src.name}-fork",
+            created_at=src.created_at,
+            status=status,
+            parent_run_id=run_id,
+            forked_from_index=at,
+            meta=dict(src.meta),
+        ))
+        for step in src.steps[:at]:
+            for ref in (step.request_ref, step.response_ref):
+                if ref is not None:
+                    payload = self.get_blob(ref)
+                    if payload is not None:
+                        dst.put_blob(payload)
+            dst.put_step(new_id, step)
+        return new_id
 
     def close(self) -> None:
         self._conn.close()

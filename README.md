@@ -23,13 +23,24 @@ responses**, **local-first**, and **MCP-native** — a combination no existing t
 
 ## Install
 
+Install straight from GitHub (requires Python ≥ 3.10):
+
 ```bash
-# core (record + replay + diff + cost + CLI)
-pip install reprise            # once published; until then, clone and use uv (see Development)
+# core: record / replay / diff / cost / CLI
+pip install "git+https://github.com/itsshreyasbhardwaj-design/reprise"
 
 # with the local web UI
-pip install 'reprise[ui]'
+pip install "reprise[ui] @ git+https://github.com/itsshreyasbhardwaj-design/reprise"
 ```
+
+Or install the `reprise` CLI as a standalone tool with [uv](https://github.com/astral-sh/uv):
+
+```bash
+uv tool install "git+https://github.com/itsshreyasbhardwaj-design/reprise"
+reprise --help
+```
+
+The import name is `reprise` and the `reprise` command lands on your PATH.
 
 ## Quickstart
 
@@ -154,7 +165,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 - [x] Per-run cost / token attribution + budget ceilings
 - [ ] Embedding- / judge-based semantic diff (Ollama), beyond the local text ratio
 - [ ] First-class adapters + integration tests against the real `openai` and `mcp` SDKs
-- [ ] PyPI release; package the UI assets into the wheel
+- [ ] Optional PyPI release (installs from GitHub today; the built wheel already bundles the UI)
 
 ## Related work & prior art
 

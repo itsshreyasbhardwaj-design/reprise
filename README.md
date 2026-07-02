@@ -166,6 +166,3 @@ integration no existing tool ships today.
 ## License
 
 MIT © 2026 Shreyas Bhardwaj
-
-Companion project: **mcplens** — an MCP server inspector & linter. Together they form a small
-MCP-reliability toolchain: lint your server, then record/replay the agents that use it.

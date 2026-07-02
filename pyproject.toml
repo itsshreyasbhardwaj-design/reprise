@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reprise"
-version = "0.0.1"
+version = "0.1.0"
 description = "Deterministic record/replay and time-travel debugging for AI agents. Local-first, MCP-native."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,11 @@ classifiers = [
 dependencies = ["pydantic>=2.6"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+ui = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8", "fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+
+[project.scripts]
+reprise = "reprise.cli:main"
 
 # TODO: set to the real repo URL once the GitHub org/username is decided.
 [project.urls]

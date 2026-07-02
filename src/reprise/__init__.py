@@ -10,7 +10,7 @@ from .capture import Recorder
 from .cost import Budget, BudgetExceeded, RunCost, run_cost, step_cost, token_cost
 from .diff import StepChange, StepDiff, TrajectoryDiff, diff_runs
 from .mcp import RecordingMCPSession, wrap_mcp_session
-from .replay import ReplayMiss, Replayer
+from .replay import Replayer, ReplayMiss
 from .schema import Run, RunStatus, Step, StepError, StepKind, TokenUsage
 from .session import Mode, Session
 from .store import TraceStore

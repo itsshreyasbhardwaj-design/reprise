@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from reprise import Recorder, ReplayMiss, Replayer, StepKind
+from reprise import Recorder, Replayer, ReplayMiss, StepKind
 
 
 class _FakeCompletions:

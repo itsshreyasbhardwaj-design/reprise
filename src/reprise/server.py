@@ -61,8 +61,17 @@ def create_app(path: str) -> Any:
     return app
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
 def serve(path: str, host: str = "127.0.0.1", port: int = 7842) -> None:  # pragma: no cover
     import uvicorn
 
+    if host not in _LOOPBACK_HOSTS:
+        print(
+            f"WARNING: binding to {host} exposes this reprise UI — including recorded "
+            "request/response payloads, which may contain secrets — to your network with "
+            "no authentication. Only do this on a trusted network.",
+        )
     print(f"reprise ui → http://{host}:{port}   ({path})")
     uvicorn.run(create_app(path), host=host, port=port, log_level="warning")

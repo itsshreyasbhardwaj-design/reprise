@@ -14,3 +14,12 @@ venv/
 *.reprise-wal
 *.reprise-shm
 .DS_Store
+
+# Security hardening: secret-shaped files, none currently present
+.env*
+!.env.example
+*.pem
+*.key
+credentials*.json
+service-account*.json
+*.log
